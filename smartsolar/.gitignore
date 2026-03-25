@@ -9,6 +9,10 @@ saved_models/
 *.pkl
 *.h5
 
+#energy_consumption_saved_models/
+*.pt
+*.pkl
+
 # Python cache
 __pycache__/
 *.pyc

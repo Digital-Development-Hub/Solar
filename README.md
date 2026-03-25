@@ -50,13 +50,18 @@ Model files are excluded from Git due to size.
 
 Download the **saved_models/** folder from:
 
-👉 [https://drive.google.com/drive/folders/1XqG_3399_OTNGNdEJ8jX81tDFSMMao1X?usp=sharing](https://drive.google.com/drive/folders/1XqG_3399_OTNGNdEJ8jX81tDFSMMao1X?usp=sharing)
+👉 [https://drive.google.com/drive/folders/1XqG_3399_OTNGNdEJ8jX81tDFSMMao1X?usp=sharing](https://drive.google.com/drive/folders/1XqG_3399_OTNGNdEJ8jX81tDFSMMao1X?usp=sharing) 
+
+Download the model for energy consumption prediction folder from:
+[https://drive.google.com/drive/folders/1k_uSKYQq0d2LNQeHJMHbvwZ9Li5PYDzb?usp=sharing]
+and save it in "energy_consumption_saved_models" folder 
 
 Place it in the project root:
 
 ```
 smartsolar/
 └── saved_models/
+|___energy_consumption_saved_models
 ```
 
 ---
@@ -209,6 +214,8 @@ Solar Energy estimation (kWh)
 * Ensure `saved_models/` exists before starting backend
 * Backend must run **before** launching Streamlit frontend
 * Recommended: run inside virtual environment
+
+
 
 
 
