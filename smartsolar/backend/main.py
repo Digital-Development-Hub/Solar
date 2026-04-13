@@ -155,7 +155,9 @@ def load_energy_models():
 
 def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
-    df["datetime"] = pd.to_datetime(df["datetime"], dayfirst=True)
+    df["datetime"] = pd.to_datetime(df["datetime"], errors='coerce')
+    # If parsing fails for any rows, we should drop them
+    df = df.dropna(subset=['datetime'])
     df = df.sort_values("datetime").reset_index(drop=True)
 
     df["hour"]      = df["datetime"].dt.hour
