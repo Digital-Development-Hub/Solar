@@ -27,7 +27,4 @@ services:
       - key: PYTHON_VERSION
         value: 3.10.12
       - key: BACKEND_URL
-        fromService:
-          type: web
-          name: smartsolar-backend
-          property: url
+        value: https://smartsolar-backend.onrender.com # Update this if your backend name differs
