@@ -1297,13 +1297,88 @@ with tab4:
             ⚡ Next 1-Hour Energy Decision
         </div>""", unsafe_allow_html=True)
 
-        # Extract t+1h values
-        solar_1h      = _sol["forecasts"][0]["energy_kwh"]      if has_solar  else None
-        solar_1h_lbl  = _sol["forecasts"][0]["hour_label"]      if has_solar  else "—"
-        energy_1h     = _con["forecasts"][0]["consumption_kwh"] if has_energy else None
-        energy_1h_lbl = _con["forecasts"][0]["hour_label"]      if has_energy else "—"
+        # ── Timeline synchronization ─────────────────────────────────────────
+        # Parse the absolute wall-clock hour (0-23) from a forecast hour_label.
+        # Labels from Solar / Energy API look like "2026-05-01 14:00" or "14:00".
+        def _hour_from_label(label: str):
+            try:
+                time_part = str(label).strip().split()[-1]   # "HH:MM"
+                return int(time_part.split(":")[0])
+            except Exception:
+                return None
 
-        # Identify best SELL hour from tariff model (peak tariff = highest price → best time to sell)
+        # Build abs_hour → (index, value) maps for each model
+        solar_hour_map  = {}   # {abs_hour: (idx, forecast_dict)}
+        energy_hour_map = {}   # {abs_hour: (idx, forecast_dict)}
+        tariff_hour_map = {}   # {abs_hour: (idx, tariff_float)}
+
+        if has_solar:
+            for _i, _f in enumerate(_sol["forecasts"]):
+                _h = _hour_from_label(_f["hour_label"])
+                if _h is not None:
+                    solar_hour_map[_h] = (_i, _f)
+
+        if has_energy:
+            for _i, _f in enumerate(_con["forecasts"]):
+                _h = _hour_from_label(_f["hour_label"])
+                if _h is not None:
+                    energy_hour_map[_h] = (_i, _f)
+
+        if has_tariff:
+            _sh_base = _tar["start_hour"]
+            for _i, _tv in enumerate(_tar["tariffs"]):
+                _h = (_sh_base + _i + 1) % 24
+                tariff_hour_map[_h] = (_i, _tv)
+
+        # Find common overlapping hours across all active models
+        _active_sets = []
+        if has_solar:  _active_sets.append(set(solar_hour_map.keys()))
+        if has_energy: _active_sets.append(set(energy_hour_map.keys()))
+        if has_tariff: _active_sets.append(set(tariff_hour_map.keys()))
+        common_hours = sorted(set.intersection(*_active_sets)) if _active_sets else []
+
+        # Fallback: overlap just solar ∩ energy if tariff misses
+        timeline_mismatch = False
+        if not common_hours:
+            timeline_mismatch = True
+            if has_solar and has_energy:
+                common_hours = sorted(set(solar_hour_map) & set(energy_hour_map))
+            elif has_solar:
+                common_hours = sorted(solar_hour_map)
+            elif has_energy:
+                common_hours = sorted(energy_hour_map)
+
+        sync_hour = common_hours[0] if common_hours else None
+
+        # Extract values at the synced hour
+        solar_1h     = None
+        solar_1h_lbl = "—"
+        if has_solar and sync_hour is not None and sync_hour in solar_hour_map:
+            _, _sf = solar_hour_map[sync_hour]
+            solar_1h     = _sf["energy_kwh"]
+            solar_1h_lbl = _sf["hour_label"]
+        elif has_solar and _sol["forecasts"]:
+            solar_1h     = _sol["forecasts"][0]["energy_kwh"]
+            solar_1h_lbl = _sol["forecasts"][0]["hour_label"]
+
+        energy_1h     = None
+        energy_1h_lbl = "—"
+        if has_energy and sync_hour is not None and sync_hour in energy_hour_map:
+            _, _ef = energy_hour_map[sync_hour]
+            energy_1h     = _ef["consumption_kwh"]
+            energy_1h_lbl = _ef["hour_label"]
+        elif has_energy and _con["forecasts"]:
+            energy_1h     = _con["forecasts"][0]["consumption_kwh"]
+            energy_1h_lbl = _con["forecasts"][0]["hour_label"]
+
+        # Tariff at the synced hour (used for cost/revenue in decision engine)
+        tariff_at_sync = None
+        if has_tariff and sync_hour is not None and sync_hour in tariff_hour_map:
+            _, tariff_at_sync = tariff_hour_map[sync_hour]
+        elif has_tariff and _tar["tariffs"]:
+            tariff_at_sync = _tar["tariffs"][0]
+
+        # Best SELL hour = peak tariff across the full 12h tariff horizon
         sell_hour_label = None
         sell_tariff_val = None
         sell_hour_abs   = None
@@ -1316,6 +1391,31 @@ with tab4:
             suffix = "AM" if sell_hour_abs < 12 else "PM"
             h12    = sell_hour_abs % 12 or 12
             sell_hour_label = f"{h12}:00 {suffix}"
+
+        # ── Sync status banner ────────────────────────────────────────────────
+        if sync_hour is not None:
+            _sync_lbl = f"{sync_hour:02d}:00"
+            _models_synced = (
+                ("☀️ Solar" if has_solar and sync_hour in solar_hour_map else "")
+                + (" · ⚡ Energy" if has_energy and sync_hour in energy_hour_map else "")
+                + (" · 💰 Tariff" if has_tariff and sync_hour in tariff_hour_map else "")
+            ).lstrip(" · ")
+            _sync_color = "#F5A623" if not timeline_mismatch else "#FF6B6B"
+            _sync_msg   = (
+                f"All models aligned at <b style='color:{_sync_color}'>{_sync_lbl}</b> — {_models_synced}"
+                if not timeline_mismatch
+                else f"Partial overlap at <b style='color:{_sync_color}'>{_sync_lbl}</b> — {_models_synced} &nbsp;·&nbsp; "
+                     "<span style='color:#FF6B6B'>Timelines differ — re-run models with the same start datetime for full accuracy.</span>"
+            )
+            st.markdown(
+                f"""<div style="background:rgba(245,166,35,0.07);border:1px solid rgba(245,166,35,0.25);
+                    border-radius:8px;padding:0.45rem 1rem;margin-bottom:0.8rem;font-size:0.83rem;">
+                    🔗 <b>Decision Engine synced to:</b> {_sync_msg}
+                </div>""",
+                unsafe_allow_html=True,
+            )
+        elif timeline_mismatch:
+            st.warning("⚠️ Model timelines do not share a common hour. Re-run all models with the same start datetime.")
 
         # ── 3 KPI cards ───────────────────────────────────────────────────────
         kpi1, kpi2, kpi3 = st.columns(3)
@@ -1400,10 +1500,9 @@ with tab4:
             else:
                 deficit_1h   = abs(surplus_1h)
                 grid_cost_txt = ""
-                if has_tariff:
-                    next_tariff   = _tar["tariffs"][0]
-                    grid_cost     = deficit_1h * next_tariff
-                    grid_cost_txt = f" | Grid import cost at current tariff: <b style='color:#FF6B6B;'>₹{grid_cost:.2f}</b>"
+                if has_tariff and tariff_at_sync is not None:
+                    grid_cost     = deficit_1h * tariff_at_sync
+                    grid_cost_txt = f" | Grid import cost at synced tariff (₹{tariff_at_sync:.2f}/kWh): <b style='color:#FF6B6B;'>₹{grid_cost:.2f}</b>"
 
                 cheap_hint = ""
                 if has_tariff:
@@ -1451,13 +1550,13 @@ with tab4:
                 st.markdown("**Next 1-Hour: Solar vs Consumption**")
                 st.bar_chart(bar_df_1h, height=220)
             with ch2:
-                if has_tariff:
-                    cur_tariff = _tar["tariffs"][0]
+                if has_tariff and tariff_at_sync is not None:
+                    _sync_hr_lbl = f"{sync_hour:02d}:00" if sync_hour is not None else "—"
                     st.markdown(f"""
                     <div class="metric-card metric-card-tariff" style="margin-top:1.8rem;text-align:center;">
-                        <div class="metric-label">Tariff — Next Hour</div>
-                        <div class="metric-value metric-value-tariff" style="font-size:1.8rem;">₹{cur_tariff:.2f}</div>
-                        <div class="metric-unit">/kWh</div>
+                        <div class="metric-label">Tariff @ {_sync_hr_lbl}</div>
+                        <div class="metric-value metric-value-tariff" style="font-size:1.8rem;">₹{tariff_at_sync:.2f}</div>
+                        <div class="metric-unit">/kWh (synced hour)</div>
                     </div>
                     <div class="metric-card" style="margin-top:0.6rem;border-color:rgba(255,107,107,0.5);text-align:center;">
                         <div class="metric-label">Best Sell @</div>
